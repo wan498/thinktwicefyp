@@ -14,7 +14,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL CONNECTION (RAILWAY SAFE) ===================== */
+/* ================= MYSQL POOL ================= */
 
 const db = mysql.createPool({
   host: process.env.MYSQLHOST,
@@ -26,94 +26,85 @@ const db = mysql.createPool({
   connectionLimit: 10,
 });
 
-/* TEST CONNECTION */
+/* TEST DB */
 (async () => {
   try {
     const conn = await db.getConnection();
-    console.log("✅ MySQL Connected Successfully");
+    console.log("✅ MySQL Connected");
     conn.release();
   } catch (err) {
-    console.error("❌ MySQL Connection Error:", err.message);
+    console.error("❌ MySQL Error:", err.message);
   }
 })();
 
-/* ===================== PATH ===================== */
+/* ================= STATIC FILES ================= */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(express.static(path.join(__dirname, "public")));
 
-/* ===================== HOME ===================== */
-
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-/* ===================== SIGNUP ===================== */
+/* ================= SIGNUP ================= */
 
 app.post("/signup", async (req, res) => {
   try {
-    console.log("🔥 SIGNUP REQUEST:", req.body);
-
     const { fullname, email, password } = req.body;
-
-    if (!fullname || !email || !password) {
-      return res.status(400).json({ message: "Missing fields" });
-    }
-
-    const [existing] = await db.query(
-      "SELECT * FROM users WHERE email = ?",
-      [email]
-    );
-
-    if (existing.length > 0) {
-      return res.status(400).json({ message: "Email already exists" });
-    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    const result = await db.query(
+    await db.query(
       "INSERT INTO users (fullname, email, password) VALUES (?, ?, ?)",
       [fullname, email, hashedPassword]
     );
 
-    console.log("✅ INSERT RESULT:", result);
-
-    res.json({ message: "Account created successfully" });
+    return res.json({
+      success: true,
+      message: "Account created successfully",
+    });
 
   } catch (err) {
-    console.error("❌ SIGNUP ERROR:", err);
-    res.status(500).json({ message: err.message });
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        success: false,
+        message: "Email already exists",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 
-/* ===================== LOGIN ===================== */
+/* ================= LOGIN ================= */
 
 app.post("/login", async (req, res) => {
   try {
-    console.log("🔥 LOGIN REQUEST:", req.body);
-
     const { email, password } = req.body;
 
     const [rows] = await db.query(
-      "SELECT * FROM users WHERE email = ?",
+      "SELECT * FROM users WHERE email=?",
       [email]
     );
 
     if (rows.length === 0) {
-      return res.json({ message: "User not found" });
+      return res.json({ success: false, message: "User not found" });
     }
 
     const user = rows[0];
-
     const valid = await bcrypt.compare(password, user.password);
 
     if (!valid) {
-      return res.json({ message: "Wrong password" });
+      return res.json({ success: false, message: "Wrong password" });
     }
 
-    res.json({
+    return res.json({
+      success: true,
       message: "Login successful",
       user: {
         id: user.id,
@@ -123,19 +114,21 @@ app.post("/login", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message });
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 });
 
-/* ===================== CHECK EMAIL ===================== */
+/* ================= CHECK EMAIL ================= */
 
 app.post("/check-email", async (req, res) => {
   try {
     const { email } = req.body;
 
     const [rows] = await db.query(
-      "SELECT * FROM users WHERE email = ?",
+      "SELECT * FROM users WHERE email=?",
       [email]
     );
 
@@ -158,7 +151,7 @@ app.post("/check-email", async (req, res) => {
   }
 });
 
-/* ===================== RESET PASSWORD ===================== */
+/* ================= RESET PASSWORD ================= */
 
 app.post("/reset-password", async (req, res) => {
   try {
@@ -198,7 +191,7 @@ app.post("/reset-password", async (req, res) => {
   }
 });
 
-/* ===================== START SERVER ===================== */
+/* ================= START SERVER ================= */
 
 const PORT = process.env.PORT || 3000;
 
