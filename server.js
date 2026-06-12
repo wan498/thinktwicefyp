@@ -14,21 +14,26 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL (PROMISE VERSION) ===================== */
+/* ===================== MYSQL POOL ===================== */
 
 const db = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "thinktwice_db",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
 });
 
-try {
-  await db.query("SELECT 1");
-  console.log("✅ MySQL Connected");
-} catch (err) {
-  console.log("❌ MySQL Error:", err);
-}
+/* Test DB connection */
+(async () => {
+  try {
+    const conn = await db.getConnection();
+    console.log("✅ MySQL Connected");
+    conn.release();
+  } catch (err) {
+    console.error("❌ MySQL Connection Error:", err.message);
+  }
+})();
 
 /* ===================== PATH ===================== */
 
@@ -41,11 +46,11 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-/* ===================== API KEY ===================== */
+/* ===================== GROQ API ===================== */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-/* ===================== API ===================== */
+/* ===================== AI ANALYZE ===================== */
 
 app.post("/api/analyze", async (req, res) => {
   try {
@@ -54,28 +59,15 @@ app.post("/api/analyze", async (req, res) => {
       aiMode,
       roles = [],
       modes = [],
-      singleMode = false   // 🔥 NEW FEATURE
+      singleMode = false
     } = req.body;
 
-    let systemPrompt = "";
-
-    /* ===================== CLEAN INPUT ===================== */
-
-    const finalRoles = Array.isArray(roles) && roles.length
-      ? roles
-      : ["Investor"];
-
-    const finalModes = Array.isArray(modes) && modes.length
-      ? modes
-      : ["Critic"];
-
-    /* ===================== COMBINATIONS ===================== */
+    const finalRoles = roles.length ? roles : ["Investor"];
+    const finalModes = modes.length ? modes : ["Critic"];
 
     let combinations = [];
 
-    // 🔥 KEY LOGIC FIX
     if (singleMode) {
-      // ONLY ONE ROLE + ONE MODE
       combinations = [
         {
           role: finalRoles[0],
@@ -83,7 +75,6 @@ app.post("/api/analyze", async (req, res) => {
         }
       ];
     } else {
-      // MULTI COMBINATION MODE
       for (const r of finalRoles) {
         for (const m of finalModes) {
           combinations.push({ role: r, mode: m });
@@ -91,67 +82,43 @@ app.post("/api/analyze", async (req, res) => {
       }
     }
 
-    /* ===================== CHATGPT MODE ===================== */
+    let systemPrompt = "";
 
     if (aiMode === "chatgpt") {
       systemPrompt = `
-You are a professional accounting and financial analysis AI assistant.
+You are a professional financial analysis AI.
 
-IMPORTANT RULES:
-- Respond ONLY in structured format
-- Do NOT add extra introduction or conclusion
-- Always include all sections
-- Be precise and analytical
-- Use numbers when possible
-
-OUTPUT FORMAT:
-
+Return structured response only:
 📊 Financial Analysis
 🧮 Calculations
 📉 Interpretation
-⚠️ Risk / Issues
+⚠️ Risk
 ✅ Recommendation
 `;
-    }
-
-    /* ===================== CONCEPT MODE ===================== */
-
-    else if (aiMode === "concept") {
+    } else if (aiMode === "concept") {
       systemPrompt = `
-You are a STRICT business analysis engine.
+STRICT MODE ANALYST
 
-RULES:
-- Follow ONLY given ROLE and MODE combinations
-- Do NOT merge roles or add extra text
-- Output must be structured exactly
+Follow ONLY these combinations:
 
-INPUT:
-${combinations.map(c => `ROLE: ${c.role}\nMODE: ${c.mode}\n---`).join("\n")}
+${combinations.map(c =>
+  `ROLE: ${c.role}\nMODE: ${c.mode}\n---`
+).join("\n")}
 
 OUTPUT FORMAT:
-
 ROLE: <ROLE>
 MODE: <MODE>
 
-📊 SCORE: X/10
-⚠️ RISK: ...
-🎯 VERDICT: ...
-🧠 CRITICISM: ...
-💡 INSIGHT: ...
-🔥 FINAL THOUGHT: ...
+📊 SCORE:
+⚠️ RISK:
+🎯 VERDICT:
+🧠 CRITICISM:
+💡 INSIGHT:
+🔥 FINAL THOUGHT:
 `;
+    } else {
+      systemPrompt = "You are a helpful AI assistant.";
     }
-
-    /* ===================== DEFAULT ===================== */
-
-    else {
-      systemPrompt = `
-You are a helpful AI assistant.
-Provide clear, structured responses.
-`;
-    }
-
-    /* ===================== GROQ CALL ===================== */
 
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -164,14 +131,8 @@ Provide clear, structured responses.
         body: JSON.stringify({
           model: "llama-3.1-8b-instant",
           messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            {
-              role: "user",
-              content: prompt
-            }
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
           ],
           temperature: aiMode === "concept" ? 0.6 : 0.3,
           max_tokens: 2500
@@ -192,20 +153,25 @@ Provide clear, structured responses.
     res.json({ result });
 
   } catch (err) {
-    console.error("SERVER ERROR:", err);
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
-
-/* ===================== START SERVER ===================== */
-
-const PORT = process.env.PORT || 3000;
 
 /* ===================== SIGNUP ===================== */
 
 app.post("/signup", async (req, res) => {
   try {
     const { fullname, email, password } = req.body;
+
+    const [check] = await db.query(
+      "SELECT * FROM users WHERE email=?",
+      [email]
+    );
+
+    if (check.length > 0) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -215,8 +181,9 @@ app.post("/signup", async (req, res) => {
     );
 
     res.json({ message: "Account created successfully" });
+
   } catch (err) {
-    res.status(400).json({ message: "Email already exists" });
+    res.status(500).json({ message: err.message });
   }
 });
 
@@ -252,14 +219,13 @@ app.post("/login", async (req, res) => {
   });
 });
 
-/* ===================== FORGOT PASSWORD STEP 1 ===================== */
-/* check email + create token */
+/* ===================== FORGOT PASSWORD ===================== */
 
 app.post("/check-email", async (req, res) => {
   const { email } = req.body;
 
   const [rows] = await db.query(
-    "SELECT * FROM users WHERE email = ?",
+    "SELECT * FROM users WHERE email=?",
     [email]
   );
 
@@ -275,13 +241,8 @@ app.post("/check-email", async (req, res) => {
     [token, expiry, email]
   );
 
-  res.json({
-    exists: true,
-    token,
-  });
+  res.json({ exists: true, token });
 });
-
-/* ===================== RESET PASSWORD ===================== */
 
 app.post("/reset-password", async (req, res) => {
   const { email, token, newPassword } = req.body;
@@ -316,6 +277,10 @@ app.post("/reset-password", async (req, res) => {
   });
 });
 
+/* ===================== START SERVER ===================== */
+
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
