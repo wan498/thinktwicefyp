@@ -14,33 +14,26 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL (RAILWAY SAFE CONFIG) ===================== */
+/* ===================== MYSQL (PROMISE VERSION) ===================== */
 
 const db = mysql.createPool({
-  host: process.env.MYSQLHOST,
-  user: process.env.MYSQLUSER,
-  password: process.env.MYSQLPASSWORD,
-  database: process.env.MYSQLDATABASE,
-  port: Number(process.env.MYSQLPORT),
-  waitForConnections: true,
-  connectionLimit: 10,
+  host: "localhost",
+  user: "root",
+  password: "",
+  database: "thinktwice_db",
 });
 
-/* TEST CONNECTION */
-(async () => {
-  try {
-    const conn = await db.getConnection();
-    console.log("✅ MySQL Connected");
-    conn.release();
-  } catch (err) {
-    console.error("❌ MySQL Connection Error:", err.message);
-  }
-})();
+try {
+  await db.query("SELECT 1");
+  console.log("✅ MySQL Connected");
+} catch (err) {
+  console.log("❌ MySQL Error:", err);
+}
 
 /* ===================== PATH ===================== */
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const dirname = path.dirname(filename);
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -48,24 +41,49 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-/* ===================== GROQ API ===================== */
+/* ===================== API KEY ===================== */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-/* ===================== AI ANALYZE ===================== */
+/* ===================== API ===================== */
 
 app.post("/api/analyze", async (req, res) => {
   try {
-    const { prompt, aiMode, roles = [], modes = [], singleMode = false } = req.body;
+    const {
+      prompt,
+      aiMode,
+      roles = [],
+      modes = [],
+      singleMode = false   // 🔥 NEW FEATURE
+    } = req.body;
 
-    const finalRoles = roles.length ? roles : ["Investor"];
-    const finalModes = modes.length ? modes : ["Critic"];
+    let systemPrompt = "";
+
+    /* ===================== CLEAN INPUT ===================== */
+
+    const finalRoles = Array.isArray(roles) && roles.length
+      ? roles
+      : ["Investor"];
+
+    const finalModes = Array.isArray(modes) && modes.length
+      ? modes
+      : ["Critic"];
+
+    /* ===================== COMBINATIONS ===================== */
 
     let combinations = [];
 
+    // 🔥 KEY LOGIC FIX
     if (singleMode) {
-      combinations = [{ role: finalRoles[0], mode: finalModes[0] }];
+      // ONLY ONE ROLE + ONE MODE
+      combinations = [
+        {
+          role: finalRoles[0],
+          mode: finalModes[0]
+        }
+      ];
     } else {
+      // MULTI COMBINATION MODE
       for (const r of finalRoles) {
         for (const m of finalModes) {
           combinations.push({ role: r, mode: m });
@@ -73,86 +91,120 @@ app.post("/api/analyze", async (req, res) => {
       }
     }
 
-    let systemPrompt = "";
+    /* ===================== CHATGPT MODE ===================== */
 
     if (aiMode === "chatgpt") {
-      systemPrompt = `
-You are a professional financial AI assistant.
+      systemPrompt = 
+You are a professional accounting and financial analysis AI assistant.
 
-Return structured output:
-📊 Analysis
+IMPORTANT RULES:
+- Respond ONLY in structured format
+- Do NOT add extra introduction or conclusion
+- Always include all sections
+- Be precise and analytical
+- Use numbers when possible
+
+OUTPUT FORMAT:
+
+📊 Financial Analysis
 🧮 Calculations
 📉 Interpretation
-⚠️ Risk
+⚠️ Risk / Issues
 ✅ Recommendation
-`;
-    } else if (aiMode === "concept") {
-      systemPrompt = `
-STRICT ANALYST MODE
+;
+    }
 
-${combinations.map(c => `ROLE: ${c.role}\nMODE: ${c.mode}\n---`).join("\n")}
+    /* ===================== CONCEPT MODE ===================== */
 
-FORMAT:
+    else if (aiMode === "concept") {
+      systemPrompt = 
+You are a STRICT business analysis engine.
+
+RULES:
+- Follow ONLY given ROLE and MODE combinations
+- Do NOT merge roles or add extra text
+- Output must be structured exactly
+
+INPUT:
+${combinations.map(c => ROLE: ${c.role}\nMODE: ${c.mode}\n---).join("\n")}
+
+OUTPUT FORMAT:
+
 ROLE: <ROLE>
 MODE: <MODE>
 
-📊 SCORE:
-⚠️ RISK:
-🎯 VERDICT:
-🧠 CRITICISM:
-💡 INSIGHT:
-🔥 FINAL:
-`;
-    } else {
-      systemPrompt = "You are a helpful AI assistant.";
+📊 SCORE: X/10
+⚠️ RISK: ...
+🎯 VERDICT: ...
+🧠 CRITICISM: ...
+💡 INSIGHT: ...
+🔥 FINAL THOUGHT: ...
+;
     }
 
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        temperature: aiMode === "concept" ? 0.6 : 0.3,
-        max_tokens: 2500
-      }),
-    });
+    /* ===================== DEFAULT ===================== */
 
-    const data = await response.json();
+    else {
+      systemPrompt = 
+You are a helpful AI assistant.
+Provide clear, structured responses.
+;
+    }
+
+    /* ===================== GROQ CALL ===================== */
+
+    const response = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: Bearer ${GROQ_API_KEY},
+        },
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant",
+          messages: [
+            {
+              role: "system",
+              content: systemPrompt
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          temperature: aiMode === "concept" ? 0.6 : 0.3,
+          max_tokens: 2500
+        }),
+      }
+    );
+const data = await response.json();
     const result = data?.choices?.[0]?.message?.content;
 
     if (!result) {
-      return res.status(500).json({ error: "No AI response", raw: data });
+      return res.status(500).json({
+        error: "No AI response",
+        raw: data
+      });
     }
 
     res.json({ result });
 
   } catch (err) {
-    console.error("AI ERROR:", err);
+    console.error("SERVER ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
+
+/* ===================== START SERVER ===================== */
+
+const PORT = process.env.PORT || 3000;
 
 /* ===================== SIGNUP ===================== */
 
 app.post("/signup", async (req, res) => {
   try {
     const { fullname, email, password } = req.body;
-
-    const [check] = await db.query(
-      "SELECT * FROM users WHERE email=?",
-      [email]
-    );
-
-    if (check.length > 0) {
-      return res.status(400).json({ message: "Email already exists" });
-    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -162,10 +214,8 @@ app.post("/signup", async (req, res) => {
     );
 
     res.json({ message: "Account created successfully" });
-
   } catch (err) {
-    console.error("SIGNUP ERROR:", err);
-    res.status(500).json({ message: err.message });
+    res.status(400).json({ message: "Email already exists" });
   }
 });
 
@@ -175,7 +225,7 @@ app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   const [rows] = await db.query(
-    "SELECT * FROM users WHERE email=?",
+    "SELECT * FROM users WHERE email = ?",
     [email]
   );
 
@@ -201,13 +251,14 @@ app.post("/login", async (req, res) => {
   });
 });
 
-/* ===================== RESET PASSWORD ===================== */
+/* ===================== FORGOT PASSWORD STEP 1 ===================== */
+/* check email + create token */
 
 app.post("/check-email", async (req, res) => {
   const { email } = req.body;
 
   const [rows] = await db.query(
-    "SELECT * FROM users WHERE email=?",
+    "SELECT * FROM users WHERE email = ?",
     [email]
   );
 
@@ -223,8 +274,13 @@ app.post("/check-email", async (req, res) => {
     [token, expiry, email]
   );
 
-  res.json({ exists: true, token });
+  res.json({
+    exists: true,
+    token,
+  });
 });
+
+/* ===================== RESET PASSWORD ===================== */
 
 app.post("/reset-password", async (req, res) => {
   const { email, token, newPassword } = req.body;
@@ -247,9 +303,9 @@ app.post("/reset-password", async (req, res) => {
   const hashed = await bcrypt.hash(newPassword, 10);
 
   await db.query(
-    `UPDATE users 
+    UPDATE users 
      SET password=?, reset_token=NULL, reset_expiry=NULL 
-     WHERE email=?`,
+     WHERE email=?,
     [hashed, email]
   );
 
@@ -259,10 +315,6 @@ app.post("/reset-password", async (req, res) => {
   });
 });
 
-/* ===================== START SERVER ===================== */
-
-const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(✅ Server running on http://localhost:${PORT});
 });
