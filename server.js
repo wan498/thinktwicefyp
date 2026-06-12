@@ -49,30 +49,47 @@ app.get("/", (req, res) => {
 });
 
 /* ================= SIGNUP ================= */
-
 app.post("/signup", async (req, res) => {
   try {
     const { fullname, email, password } = req.body;
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    if (!fullname || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing fields",
+      });
+    }
 
-    await db.query(
-      "INSERT INTO users (fullname, email, password) VALUES (?, ?, ?)",
-      [fullname, email, hashedPassword]
+    // check duplicate email
+    const [existing] = await db.query(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
     );
 
-    return res.json({
-      success: true,
-      message: "Account created successfully",
-    });
-
-  } catch (err) {
-    if (err.code === "ER_DUP_ENTRY") {
+    if (existing.length > 0) {
       return res.status(409).json({
         success: false,
         message: "Email already exists",
       });
     }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const [result] = await db.query(
+      "INSERT INTO users (fullname, email, password) VALUES (?, ?, ?)",
+      [fullname, email, hashedPassword]
+    );
+
+    console.log("✅ USER INSERTED:", result.insertId);
+
+    return res.json({
+      success: true,
+      message: "Account created successfully",
+      userId: result.insertId,
+    });
+
+  } catch (err) {
+    console.error("❌ SIGNUP ERROR:", err);
 
     return res.status(500).json({
       success: false,
