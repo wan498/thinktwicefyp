@@ -14,11 +14,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL (FIXED FOR RAILWAY) ===================== */
+/* ===================== MYSQL (RAILWAY SAFE CONFIG) ===================== */
 
-const db = mysql.createPool(process.env.DATABASE_URL);
+const db = mysql.createPool({
+  host: process.env.MYSQLHOST,
+  user: process.env.MYSQLUSER,
+  password: process.env.MYSQLPASSWORD,
+  database: process.env.MYSQLDATABASE,
+  port: Number(process.env.MYSQLPORT),
+  waitForConnections: true,
+  connectionLimit: 10,
+});
 
-/* Test DB connection */
+/* TEST CONNECTION */
 (async () => {
   try {
     const conn = await db.getConnection();
@@ -69,10 +77,10 @@ app.post("/api/analyze", async (req, res) => {
 
     if (aiMode === "chatgpt") {
       systemPrompt = `
-You are a professional financial analysis AI.
+You are a professional financial AI assistant.
 
-Return structured response only:
-📊 Financial Analysis
+Return structured output:
+📊 Analysis
 🧮 Calculations
 📉 Interpretation
 ⚠️ Risk
@@ -80,11 +88,11 @@ Return structured response only:
 `;
     } else if (aiMode === "concept") {
       systemPrompt = `
-STRICT MODE ANALYST
+STRICT ANALYST MODE
 
 ${combinations.map(c => `ROLE: ${c.role}\nMODE: ${c.mode}\n---`).join("\n")}
 
-OUTPUT FORMAT:
+FORMAT:
 ROLE: <ROLE>
 MODE: <MODE>
 
@@ -93,7 +101,7 @@ MODE: <MODE>
 🎯 VERDICT:
 🧠 CRITICISM:
 💡 INSIGHT:
-🔥 FINAL THOUGHT:
+🔥 FINAL:
 `;
     } else {
       systemPrompt = "You are a helpful AI assistant.";
@@ -126,7 +134,7 @@ MODE: <MODE>
     res.json({ result });
 
   } catch (err) {
-    console.error(err);
+    console.error("AI ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -156,7 +164,7 @@ app.post("/signup", async (req, res) => {
     res.json({ message: "Account created successfully" });
 
   } catch (err) {
-    console.error(err);
+    console.error("SIGNUP ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 });
