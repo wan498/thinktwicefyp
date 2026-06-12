@@ -14,161 +14,76 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL ===================== */
+/* ===================== MYSQL CONNECTION (RAILWAY SAFE) ===================== */
 
 const db = mysql.createPool({
-  host: process.env.MYSQLHOST || "localhost",
-  user: process.env.MYSQLUSER || "root",
-  password: process.env.MYSQLPASSWORD || "",
-  database: process.env.MYSQLDATABASE || "thinktwice_db",
-  port: Number(process.env.MYSQLPORT) || 3306,
+  host: process.env.MYSQLHOST,
+  user: process.env.MYSQLUSER,
+  password: process.env.MYSQLPASSWORD,
+  database: process.env.MYSQLDATABASE,
+  port: Number(process.env.MYSQLPORT),
   waitForConnections: true,
   connectionLimit: 10,
 });
 
-/* TEST DB */
+/* TEST CONNECTION */
 (async () => {
   try {
     const conn = await db.getConnection();
-    console.log("✅ MySQL Connected");
+    console.log("✅ MySQL Connected Successfully");
     conn.release();
   } catch (err) {
-    console.error("❌ MySQL Error:", err.message);
+    console.error("❌ MySQL Connection Error:", err.message);
   }
 })();
 
-/* ===================== PATH FIX ===================== */
+/* ===================== PATH ===================== */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 app.use(express.static(path.join(__dirname, "public")));
 
+/* ===================== HOME ===================== */
+
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
-});
-
-/* ===================== GROQ API ===================== */
-
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-
-/* ===================== AI ANALYZE ===================== */
-
-app.post("/api/analyze", async (req, res) => {
-  try {
-    const { prompt, aiMode, roles = [], modes = [], singleMode = false } = req.body;
-
-    const finalRoles = roles.length ? roles : ["Investor"];
-    const finalModes = modes.length ? modes : ["Critic"];
-
-    let combinations = [];
-
-    if (singleMode) {
-      combinations = [{ role: finalRoles[0], mode: finalModes[0] }];
-    } else {
-      for (const r of finalRoles) {
-        for (const m of finalModes) {
-          combinations.push({ role: r, mode: m });
-        }
-      }
-    }
-
-    let systemPrompt = "";
-
-    /* ===================== MODE ===================== */
-
-    if (aiMode === "chatgpt") {
-      systemPrompt = `
-You are a professional accounting AI assistant.
-
-Output:
-📊 Financial Analysis
-🧮 Calculations
-📉 Interpretation
-⚠️ Risk
-✅ Recommendation
-`;
-    } else if (aiMode === "concept") {
-      systemPrompt = `
-STRICT BUSINESS ANALYST
-
-${combinations.map(c => `ROLE: ${c.role}\nMODE: ${c.mode}\n---`).join("\n")}
-
-OUTPUT FORMAT:
-ROLE: <ROLE>
-MODE: <MODE>
-
-📊 SCORE:
-⚠️ RISK:
-🎯 VERDICT:
-🧠 CRITICISM:
-💡 INSIGHT:
-🔥 FINAL THOUGHT:
-`;
-    } else {
-      systemPrompt = "You are a helpful AI assistant.";
-    }
-
-    /* ===================== GROQ CALL ===================== */
-
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GROQ_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
-        ],
-        temperature: aiMode === "concept" ? 0.6 : 0.3,
-        max_tokens: 2500
-      }),
-    });
-
-    const data = await response.json();
-    const result = data?.choices?.[0]?.message?.content;
-
-    if (!result) {
-      return res.status(500).json({ error: "No AI response", raw: data });
-    }
-
-    res.json({ result });
-
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
 });
 
 /* ===================== SIGNUP ===================== */
 
 app.post("/signup", async (req, res) => {
   try {
+    console.log("🔥 SIGNUP REQUEST:", req.body);
+
     const { fullname, email, password } = req.body;
 
-    const [check] = await db.query(
-      "SELECT * FROM users WHERE email=?",
+    if (!fullname || !email || !password) {
+      return res.status(400).json({ message: "Missing fields" });
+    }
+
+    const [existing] = await db.query(
+      "SELECT * FROM users WHERE email = ?",
       [email]
     );
 
-    if (check.length > 0) {
+    if (existing.length > 0) {
       return res.status(400).json({ message: "Email already exists" });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await db.query(
-      "INSERT INTO users(fullname, email, password) VALUES (?, ?, ?)",
+    const result = await db.query(
+      "INSERT INTO users (fullname, email, password) VALUES (?, ?, ?)",
       [fullname, email, hashedPassword]
     );
+
+    console.log("✅ INSERT RESULT:", result);
 
     res.json({ message: "Account created successfully" });
 
   } catch (err) {
-    console.error(err);
+    console.error("❌ SIGNUP ERROR:", err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -177,10 +92,12 @@ app.post("/signup", async (req, res) => {
 
 app.post("/login", async (req, res) => {
   try {
+    console.log("🔥 LOGIN REQUEST:", req.body);
+
     const { email, password } = req.body;
 
     const [rows] = await db.query(
-      "SELECT * FROM users WHERE email=?",
+      "SELECT * FROM users WHERE email = ?",
       [email]
     );
 
@@ -206,6 +123,7 @@ app.post("/login", async (req, res) => {
     });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -217,7 +135,7 @@ app.post("/check-email", async (req, res) => {
     const { email } = req.body;
 
     const [rows] = await db.query(
-      "SELECT * FROM users WHERE email=?",
+      "SELECT * FROM users WHERE email = ?",
       [email]
     );
 
@@ -285,5 +203,5 @@ app.post("/reset-password", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
