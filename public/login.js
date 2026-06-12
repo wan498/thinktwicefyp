@@ -43,62 +43,89 @@ function toggleTheme() {
 }
 
 /* =========================
-   SIGNUP
+   SIGNUP (FIXED)
 ========================= */
 
 document.getElementById("signupBtn").addEventListener("click", async () => {
   const inputs = document.querySelectorAll(".signup-modal input");
 
-  const fullname = inputs[0].value;
-  const email = inputs[1].value;
+  const fullname = inputs[0].value.trim();
+  const email = inputs[1].value.trim();
   const password = inputs[2].value;
   const confirmPassword = inputs[3].value;
+
+  if (!fullname || !email || !password || !confirmPassword) {
+    alert("Please fill all fields");
+    return;
+  }
 
   if (password !== confirmPassword) {
     alert("Passwords do not match");
     return;
   }
 
-  const res = await fetch("/signup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fullname, email, password })
-  });
+  try {
+    const res = await fetch("/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fullname, email, password })
+    });
 
-  const data = await res.json();
-  alert(data.message);
+    const data = await res.json();
+
+    alert(data.message);
+
+    if (data.success) {
+      closeSignupModal();
+    }
+
+  } catch (err) {
+    alert("Signup failed. Server error.");
+    console.error(err);
+  }
 });
 
 /* =========================
-   LOGIN + REMEMBER ME
+   LOGIN (FIXED + SAFE REDIRECT)
 ========================= */
 
 document.getElementById("loginBtn").addEventListener("click", async () => {
-  const email = document.querySelector(".login-card input[type='email']").value;
+  const email = document.querySelector(".login-card input[type='email']").value.trim();
   const password = document.getElementById("loginPassword").value;
   const remember = document.getElementById("rememberMe").checked;
 
-  const res = await fetch("/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password })
-  });
-
-  const data = await res.json();
-
-  alert(data.message);
-
-  if (data.message === "Login successful") {
-  localStorage.setItem("user", JSON.stringify(data.user));
-
-  if (remember) {
-    localStorage.setItem("savedEmail", email);
-  } else {
-    localStorage.removeItem("savedEmail");
+  if (!email || !password) {
+    alert("Please enter email and password");
+    return;
   }
 
-  window.location.href = "fyp.html";
-}
+  try {
+    const res = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password })
+    });
+
+    const data = await res.json();
+
+    alert(data.message);
+
+    if (data.success) {
+      localStorage.setItem("user", JSON.stringify(data.user));
+
+      if (remember) {
+        localStorage.setItem("savedEmail", email);
+      } else {
+        localStorage.removeItem("savedEmail");
+      }
+
+      window.location.href = "/fyp.html";
+    }
+
+  } catch (err) {
+    alert("Login failed. Server error.");
+    console.error(err);
+  }
 });
 
 /* =========================
@@ -109,7 +136,9 @@ window.addEventListener("DOMContentLoaded", () => {
   const savedEmail = localStorage.getItem("savedEmail");
 
   if (savedEmail) {
-    document.querySelector(".login-card input[type='email']").value = savedEmail;
+    const emailInput = document.querySelector(".login-card input[type='email']");
+    if (emailInput) emailInput.value = savedEmail;
+
     document.getElementById("rememberMe").checked = true;
   }
 });
@@ -138,37 +167,42 @@ function setupPasswordToggle(toggleId, inputId) {
 setupPasswordToggle("loginToggle", "loginPassword");
 setupPasswordToggle("signupToggle", "signupPassword");
 setupPasswordToggle("confirmToggle", "confirmPassword");
+setupPasswordToggle("toggleNewPassword", "newPassword");
+setupPasswordToggle("toggleConfirmNewPassword", "confirmNewPassword");
 
 /* =========================
-   FORGOT PASSWORD FLOW
+   FORGOT PASSWORD FLOW (FIXED)
 ========================= */
 
 let resetToken = null;
-let step = 1; // 1 = check email, 2 = reset password
+let step = 1;
 
 document.getElementById("sendResetBtn").addEventListener("click", async () => {
 
-  const email = document.querySelector("#forgotModal input[type='email']").value;
+  const email = document.querySelector("#forgotModal input[type='email']").value.trim();
 
-  /* =========================
-     STEP 1: CHECK EMAIL
-  ========================= */
-  if (step === 1) {
+  if (!email) {
+    alert("Please enter email");
+    return;
+  }
 
-    if (!email) {
-      alert("Please enter email");
-      return;
-    }
+  try {
 
-    const res = await fetch("/check-email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email })
-    });
+    /* STEP 1 */
+    if (step === 1) {
 
-    const data = await res.json();
+      const res = await fetch("/check-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email })
+      });
 
-    if (data.exists) {
+      const data = await res.json();
+
+      if (!data.exists) {
+        alert("Email not found");
+        return;
+      }
 
       alert("Email verified. Enter new password.");
 
@@ -179,59 +213,52 @@ document.getElementById("sendResetBtn").addEventListener("click", async () => {
 
       document.getElementById("sendResetBtn").innerText = "Update Password";
 
-      step = 2; // move to next step
-
-    } else {
-      alert("Email not found");
+      step = 2;
+      return;
     }
 
-    return;
-  }
+    /* STEP 2 */
+    const newPassword = document.getElementById("newPassword").value;
+    const confirmPassword = document.getElementById("confirmNewPassword").value;
 
-  /* =========================
-     STEP 2: RESET PASSWORD
-  ========================= */
+    if (!newPassword || !confirmPassword) {
+      alert("Please enter password");
+      return;
+    }
 
-  const newPassword = document.getElementById("newPassword").value;
-  const confirmPassword = document.getElementById("confirmNewPassword").value;
+    if (newPassword !== confirmPassword) {
+      alert("Passwords do not match");
+      return;
+    }
 
-  if (!newPassword || !confirmPassword) {
-    alert("Please enter password");
-    return;
-  }
+    const res = await fetch("/reset-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email,
+        token: resetToken,
+        newPassword
+      })
+    });
 
-  if (newPassword !== confirmPassword) {
-    alert("Passwords do not match");
-    return;
-  }
+    const data = await res.json();
 
-  const res = await fetch("/reset-password", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email,
-      token: resetToken,
-      newPassword
-    })
-  });
+    alert(data.message);
 
-  const data = await res.json();
+    if (data.success) {
+      closeForgotModal();
 
-  alert(data.message);
+      step = 1;
+      resetToken = null;
 
-  if (data.success) {
-    closeForgotModal();
+      document.getElementById("sendResetBtn").innerText = "Verify Email";
 
-    // reset UI state
-    step = 1;
-    resetToken = null;
+      document.getElementById("newPasswordBox").style.display = "none";
+      document.getElementById("confirmNewPasswordBox").style.display = "none";
+    }
 
-    document.getElementById("sendResetBtn").innerText = "Verify Email";
-
-    document.getElementById("newPasswordBox").style.display = "none";
-    document.getElementById("confirmNewPasswordBox").style.display = "none";
+  } catch (err) {
+    alert("Request failed");
+    console.error(err);
   }
 });
-
-setupPasswordToggle("toggleNewPassword", "newPassword");
-setupPasswordToggle("toggleConfirmNewPassword", "confirmNewPassword");
