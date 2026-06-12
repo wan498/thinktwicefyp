@@ -14,26 +14,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL (PROMISE VERSION) ===================== */
+/* ===================== MYSQL ===================== */
 
 const db = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "thinktwice_db",
+  host: process.env.MYSQLHOST || "localhost",
+  user: process.env.MYSQLUSER || "root",
+  password: process.env.MYSQLPASSWORD || "",
+  database: process.env.MYSQLDATABASE || "thinktwice_db",
+  port: Number(process.env.MYSQLPORT) || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
 });
 
-try {
-  await db.query("SELECT 1");
-  console.log("✅ MySQL Connected");
-} catch (err) {
-  console.log("❌ MySQL Error:", err);
-}
+/* TEST DB */
+(async () => {
+  try {
+    const conn = await db.getConnection();
+    console.log("✅ MySQL Connected");
+    conn.release();
+  } catch (err) {
+    console.error("❌ MySQL Error:", err.message);
+  }
+})();
 
-/* ===================== PATH ===================== */
+/* ===================== PATH FIX ===================== */
 
 const __filename = fileURLToPath(import.meta.url);
-const dirname = path.dirname(filename);
+const __dirname = path.dirname(__filename);
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -41,49 +48,24 @@ app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
-/* ===================== API KEY ===================== */
+/* ===================== GROQ API ===================== */
 
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-/* ===================== API ===================== */
+/* ===================== AI ANALYZE ===================== */
 
 app.post("/api/analyze", async (req, res) => {
   try {
-    const {
-      prompt,
-      aiMode,
-      roles = [],
-      modes = [],
-      singleMode = false   // 🔥 NEW FEATURE
-    } = req.body;
+    const { prompt, aiMode, roles = [], modes = [], singleMode = false } = req.body;
 
-    let systemPrompt = "";
-
-    /* ===================== CLEAN INPUT ===================== */
-
-    const finalRoles = Array.isArray(roles) && roles.length
-      ? roles
-      : ["Investor"];
-
-    const finalModes = Array.isArray(modes) && modes.length
-      ? modes
-      : ["Critic"];
-
-    /* ===================== COMBINATIONS ===================== */
+    const finalRoles = roles.length ? roles : ["Investor"];
+    const finalModes = modes.length ? modes : ["Critic"];
 
     let combinations = [];
 
-    // 🔥 KEY LOGIC FIX
     if (singleMode) {
-      // ONLY ONE ROLE + ONE MODE
-      combinations = [
-        {
-          role: finalRoles[0],
-          mode: finalModes[0]
-        }
-      ];
+      combinations = [{ role: finalRoles[0], mode: finalModes[0] }];
     } else {
-      // MULTI COMBINATION MODE
       for (const r of finalRoles) {
         for (const m of finalModes) {
           combinations.push({ role: r, mode: m });
@@ -91,120 +73,90 @@ app.post("/api/analyze", async (req, res) => {
       }
     }
 
-    /* ===================== CHATGPT MODE ===================== */
+    let systemPrompt = "";
+
+    /* ===================== MODE ===================== */
 
     if (aiMode === "chatgpt") {
-      systemPrompt = 
-You are a professional accounting and financial analysis AI assistant.
+      systemPrompt = `
+You are a professional accounting AI assistant.
 
-IMPORTANT RULES:
-- Respond ONLY in structured format
-- Do NOT add extra introduction or conclusion
-- Always include all sections
-- Be precise and analytical
-- Use numbers when possible
-
-OUTPUT FORMAT:
-
+Output:
 📊 Financial Analysis
 🧮 Calculations
 📉 Interpretation
-⚠️ Risk / Issues
+⚠️ Risk
 ✅ Recommendation
-;
-    }
+`;
+    } else if (aiMode === "concept") {
+      systemPrompt = `
+STRICT BUSINESS ANALYST
 
-    /* ===================== CONCEPT MODE ===================== */
-
-    else if (aiMode === "concept") {
-      systemPrompt = 
-You are a STRICT business analysis engine.
-
-RULES:
-- Follow ONLY given ROLE and MODE combinations
-- Do NOT merge roles or add extra text
-- Output must be structured exactly
-
-INPUT:
-${combinations.map(c => ROLE: ${c.role}\nMODE: ${c.mode}\n---).join("\n")}
+${combinations.map(c => `ROLE: ${c.role}\nMODE: ${c.mode}\n---`).join("\n")}
 
 OUTPUT FORMAT:
-
 ROLE: <ROLE>
 MODE: <MODE>
 
-📊 SCORE: X/10
-⚠️ RISK: ...
-🎯 VERDICT: ...
-🧠 CRITICISM: ...
-💡 INSIGHT: ...
-🔥 FINAL THOUGHT: ...
-;
-    }
-
-    /* ===================== DEFAULT ===================== */
-
-    else {
-      systemPrompt = 
-You are a helpful AI assistant.
-Provide clear, structured responses.
-;
+📊 SCORE:
+⚠️ RISK:
+🎯 VERDICT:
+🧠 CRITICISM:
+💡 INSIGHT:
+🔥 FINAL THOUGHT:
+`;
+    } else {
+      systemPrompt = "You are a helpful AI assistant.";
     }
 
     /* ===================== GROQ CALL ===================== */
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: Bearer ${GROQ_API_KEY},
-        },
-        body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          temperature: aiMode === "concept" ? 0.6 : 0.3,
-          max_tokens: 2500
-        }),
-      }
-    );
-const data = await response.json();
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
+        ],
+        temperature: aiMode === "concept" ? 0.6 : 0.3,
+        max_tokens: 2500
+      }),
+    });
+
+    const data = await response.json();
     const result = data?.choices?.[0]?.message?.content;
 
     if (!result) {
-      return res.status(500).json({
-        error: "No AI response",
-        raw: data
-      });
+      return res.status(500).json({ error: "No AI response", raw: data });
     }
 
     res.json({ result });
 
   } catch (err) {
-    console.error("SERVER ERROR:", err);
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
-
-/* ===================== START SERVER ===================== */
-
-const PORT = process.env.PORT || 3000;
 
 /* ===================== SIGNUP ===================== */
 
 app.post("/signup", async (req, res) => {
   try {
     const { fullname, email, password } = req.body;
+
+    const [check] = await db.query(
+      "SELECT * FROM users WHERE email=?",
+      [email]
+    );
+
+    if (check.length > 0) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -214,107 +166,124 @@ app.post("/signup", async (req, res) => {
     );
 
     res.json({ message: "Account created successfully" });
+
   } catch (err) {
-    res.status(400).json({ message: "Email already exists" });
+    console.error(err);
+    res.status(500).json({ message: err.message });
   }
 });
 
 /* ===================== LOGIN ===================== */
 
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email = ?",
-    [email]
-  );
+    const [rows] = await db.query(
+      "SELECT * FROM users WHERE email=?",
+      [email]
+    );
 
-  if (rows.length === 0) {
-    return res.json({ message: "User not found" });
+    if (rows.length === 0) {
+      return res.json({ message: "User not found" });
+    }
+
+    const user = rows[0];
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.json({ message: "Wrong password" });
+    }
+
+    res.json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        fullname: user.fullname,
+        email: user.email,
+      },
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-
-  const user = rows[0];
-
-  const valid = await bcrypt.compare(password, user.password);
-
-  if (!valid) {
-    return res.json({ message: "Wrong password" });
-  }
-
-  res.json({
-    message: "Login successful",
-    user: {
-      id: user.id,
-      fullname: user.fullname,
-      email: user.email,
-    },
-  });
 });
 
-/* ===================== FORGOT PASSWORD STEP 1 ===================== */
-/* check email + create token */
+/* ===================== CHECK EMAIL ===================== */
 
 app.post("/check-email", async (req, res) => {
-  const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email = ?",
-    [email]
-  );
+    const [rows] = await db.query(
+      "SELECT * FROM users WHERE email=?",
+      [email]
+    );
 
-  if (rows.length === 0) {
-    return res.json({ exists: false });
+    if (rows.length === 0) {
+      return res.json({ exists: false });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiry = new Date(Date.now() + 15 * 60 * 1000);
+
+    await db.query(
+      "UPDATE users SET reset_token=?, reset_expiry=? WHERE email=?",
+      [token, expiry, email]
+    );
+
+    res.json({ exists: true, token });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-
-  const token = crypto.randomBytes(32).toString("hex");
-  const expiry = new Date(Date.now() + 15 * 60 * 1000);
-
-  await db.query(
-    "UPDATE users SET reset_token=?, reset_expiry=? WHERE email=?",
-    [token, expiry, email]
-  );
-
-  res.json({
-    exists: true,
-    token,
-  });
 });
 
 /* ===================== RESET PASSWORD ===================== */
 
 app.post("/reset-password", async (req, res) => {
-  const { email, token, newPassword } = req.body;
+  try {
+    const { email, token, newPassword } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email=? AND reset_token=?",
-    [email, token]
-  );
+    const [rows] = await db.query(
+      "SELECT * FROM users WHERE email=? AND reset_token=?",
+      [email, token]
+    );
 
-  if (rows.length === 0) {
-    return res.json({ success: false, message: "Invalid token" });
+    if (rows.length === 0) {
+      return res.json({ success: false, message: "Invalid token" });
+    }
+
+    const user = rows[0];
+
+    if (new Date(user.reset_expiry) < new Date()) {
+      return res.json({ success: false, message: "Token expired" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await db.query(
+      `UPDATE users 
+       SET password=?, reset_token=NULL, reset_expiry=NULL 
+       WHERE email=?`,
+      [hashed, email]
+    );
+
+    res.json({
+      success: true,
+      message: "Password updated successfully",
+    });
+
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
-
-  const user = rows[0];
-
-  if (new Date(user.reset_expiry) < new Date()) {
-    return res.json({ success: false, message: "Token expired" });
-  }
-
-  const hashed = await bcrypt.hash(newPassword, 10);
-
-  await db.query(
-    UPDATE users 
-     SET password=?, reset_token=NULL, reset_expiry=NULL 
-     WHERE email=?,
-    [hashed, email]
-  );
-
-  res.json({
-    success: true,
-    message: "Password updated successfully",
-  });
 });
 
+/* ===================== START SERVER ===================== */
+
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(✅ Server running on http://localhost:${PORT});
+  console.log(`✅ Server running on http://localhost:${PORT}`);
 });
