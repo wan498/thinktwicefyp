@@ -47,15 +47,15 @@ function toggleTheme() {
 ========================= */
 
 document.getElementById("signupBtn").addEventListener("click", async () => {
-  const inputs = document.querySelectorAll(".signup-modal input");
+  const inputs = document.querySelectorAll("#signupModal input");
 
   const fullname = inputs[0].value.trim();
   const email = inputs[1].value.trim();
   const password = inputs[2].value;
   const confirmPassword = inputs[3].value;
 
-  if (!fullname || !email || !password || !confirmPassword) {
-    alert("Please fill all fields");
+  if (!fullname || !email || !password) {
+    alert("Fill all fields");
     return;
   }
 
@@ -64,24 +64,18 @@ document.getElementById("signupBtn").addEventListener("click", async () => {
     return;
   }
 
-  try {
-    const res = await fetch("/signup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fullname, email, password })
-    });
+  const res = await fetch("/signup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fullname, email, password })
+  });
 
-    const data = await res.json();
+  const data = await res.json();
 
-    alert(data.message);
+  alert(data.message);
 
-    if (data.success) {
-      closeSignupModal();
-    }
-
-  } catch (err) {
-    alert("Signup failed. Server error.");
-    console.error(err);
+  if (data.success) {
+    closeSignupModal();
   }
 });
 
