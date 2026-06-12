@@ -14,15 +14,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* ===================== MYSQL POOL ===================== */
+/* ===================== MYSQL (FIXED FOR RAILWAY) ===================== */
 
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
-});
+const db = mysql.createPool(process.env.DATABASE_URL);
 
 /* Test DB connection */
 (async () => {
@@ -54,13 +48,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 app.post("/api/analyze", async (req, res) => {
   try {
-    const {
-      prompt,
-      aiMode,
-      roles = [],
-      modes = [],
-      singleMode = false
-    } = req.body;
+    const { prompt, aiMode, roles = [], modes = [], singleMode = false } = req.body;
 
     const finalRoles = roles.length ? roles : ["Investor"];
     const finalModes = modes.length ? modes : ["Critic"];
@@ -68,12 +56,7 @@ app.post("/api/analyze", async (req, res) => {
     let combinations = [];
 
     if (singleMode) {
-      combinations = [
-        {
-          role: finalRoles[0],
-          mode: finalModes[0]
-        }
-      ];
+      combinations = [{ role: finalRoles[0], mode: finalModes[0] }];
     } else {
       for (const r of finalRoles) {
         for (const m of finalModes) {
@@ -99,11 +82,7 @@ Return structured response only:
       systemPrompt = `
 STRICT MODE ANALYST
 
-Follow ONLY these combinations:
-
-${combinations.map(c =>
-  `ROLE: ${c.role}\nMODE: ${c.mode}\n---`
-).join("\n")}
+${combinations.map(c => `ROLE: ${c.role}\nMODE: ${c.mode}\n---`).join("\n")}
 
 OUTPUT FORMAT:
 ROLE: <ROLE>
@@ -120,34 +99,28 @@ MODE: <MODE>
       systemPrompt = "You are a helpful AI assistant.";
     }
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-        },
-        body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt }
-          ],
-          temperature: aiMode === "concept" ? 0.6 : 0.3,
-          max_tokens: 2500
-        }),
-      }
-    );
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
+        ],
+        temperature: aiMode === "concept" ? 0.6 : 0.3,
+        max_tokens: 2500
+      }),
+    });
 
     const data = await response.json();
     const result = data?.choices?.[0]?.message?.content;
 
     if (!result) {
-      return res.status(500).json({
-        error: "No AI response",
-        raw: data
-      });
+      return res.status(500).json({ error: "No AI response", raw: data });
     }
 
     res.json({ result });
@@ -183,6 +156,7 @@ app.post("/signup", async (req, res) => {
     res.json({ message: "Account created successfully" });
 
   } catch (err) {
+    console.error(err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -193,7 +167,7 @@ app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   const [rows] = await db.query(
-    "SELECT * FROM users WHERE email = ?",
+    "SELECT * FROM users WHERE email=?",
     [email]
   );
 
@@ -219,7 +193,7 @@ app.post("/login", async (req, res) => {
   });
 });
 
-/* ===================== FORGOT PASSWORD ===================== */
+/* ===================== RESET PASSWORD ===================== */
 
 app.post("/check-email", async (req, res) => {
   const { email } = req.body;
