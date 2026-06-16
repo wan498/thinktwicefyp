@@ -1,3 +1,4 @@
+const API_URL = window.location.origin;
 /* =========================
    MODALS
 ========================= */
@@ -43,83 +44,62 @@ function toggleTheme() {
 }
 
 /* =========================
-   SIGNUP (FIXED)
+   SIGNUP
 ========================= */
 
 document.getElementById("signupBtn").addEventListener("click", async () => {
-  const inputs = document.querySelectorAll("#signupModal input");
+  const inputs = document.querySelectorAll(".signup-modal input");
 
-  const fullname = inputs[0].value.trim();
-  const email = inputs[1].value.trim();
+  const fullname = inputs[0].value;
+  const email = inputs[1].value;
   const password = inputs[2].value;
   const confirmPassword = inputs[3].value;
-
-  if (!fullname || !email || !password) {
-    alert("Fill all fields");
-    return;
-  }
 
   if (password !== confirmPassword) {
     alert("Passwords do not match");
     return;
   }
 
-  const res = await fetch("https://thinktwicefyp-production.up.railway.app/signup", {
+  const res = await fetch("http://localhost:3000/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fullname, email, password })
   });
 
   const data = await res.json();
-
   alert(data.message);
-
-  if (data.success) {
-    closeSignupModal();
-  }
 });
 
 /* =========================
-   LOGIN (FIXED + SAFE REDIRECT)
+   LOGIN + REMEMBER ME
 ========================= */
 
 document.getElementById("loginBtn").addEventListener("click", async () => {
-  const email = document.querySelector(".login-card input[type='email']").value.trim();
+  const email = document.querySelector(".login-card input[type='email']").value;
   const password = document.getElementById("loginPassword").value;
   const remember = document.getElementById("rememberMe").checked;
 
-  if (!email || !password) {
-    alert("Please enter email and password");
-    return;
+  const res = await fetch("http://localhost:3000/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password })
+  });
+
+  const data = await res.json();
+
+  alert(data.message);
+
+  if (data.message === "Login successful") {
+  localStorage.setItem("user", JSON.stringify(data.user));
+
+  if (remember) {
+    localStorage.setItem("savedEmail", email);
+  } else {
+    localStorage.removeItem("savedEmail");
   }
 
-  try {
-    const res = await fetch("https://thinktwicefyp-production.up.railway.app/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
-    });
-
-    const data = await res.json();
-
-    alert(data.message);
-
-    if (data.success) {
-      localStorage.setItem("user", JSON.stringify(data.user));
-
-      if (remember) {
-        localStorage.setItem("savedEmail", email);
-      } else {
-        localStorage.removeItem("savedEmail");
-      }
-
-      window.location.href = "/fyp.html";
-    }
-
-  } catch (err) {
-    alert("Login failed. Server error.");
-    console.error(err);
-  }
+  window.location.href = "fyp.html";
+}
 });
 
 /* =========================
@@ -130,9 +110,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const savedEmail = localStorage.getItem("savedEmail");
 
   if (savedEmail) {
-    const emailInput = document.querySelector(".login-card input[type='email']");
-    if (emailInput) emailInput.value = savedEmail;
-
+    document.querySelector(".login-card input[type='email']").value = savedEmail;
     document.getElementById("rememberMe").checked = true;
   }
 });
@@ -161,42 +139,37 @@ function setupPasswordToggle(toggleId, inputId) {
 setupPasswordToggle("loginToggle", "loginPassword");
 setupPasswordToggle("signupToggle", "signupPassword");
 setupPasswordToggle("confirmToggle", "confirmPassword");
-setupPasswordToggle("toggleNewPassword", "newPassword");
-setupPasswordToggle("toggleConfirmNewPassword", "confirmNewPassword");
 
 /* =========================
-   FORGOT PASSWORD FLOW (FIXED)
+   FORGOT PASSWORD FLOW
 ========================= */
 
 let resetToken = null;
-let step = 1;
+let step = 1; // 1 = check email, 2 = reset password
 
 document.getElementById("sendResetBtn").addEventListener("click", async () => {
 
-  const email = document.querySelector("#forgotModal input[type='email']").value.trim();
+  const email = document.querySelector("#forgotModal input[type='email']").value;
 
-  if (!email) {
-    alert("Please enter email");
-    return;
-  }
+  /* =========================
+     STEP 1: CHECK EMAIL
+  ========================= */
+  if (step === 1) {
 
-  try {
+    if (!email) {
+      alert("Please enter email");
+      return;
+    }
 
-    /* STEP 1 */
-    if (step === 1) {
+    const res = await fetch("http://localhost:3000/check-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email })
+    });
 
-      const res = await fetch("https://thinktwicefyp-production.up.railway.app/check-email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email })
-      });
+    const data = await res.json();
 
-      const data = await res.json();
-
-      if (!data.exists) {
-        alert("Email not found");
-        return;
-      }
+    if (data.exists) {
 
       alert("Email verified. Enter new password.");
 
@@ -207,52 +180,59 @@ document.getElementById("sendResetBtn").addEventListener("click", async () => {
 
       document.getElementById("sendResetBtn").innerText = "Update Password";
 
-      step = 2;
-      return;
+      step = 2; // move to next step
+
+    } else {
+      alert("Email not found");
     }
 
-    /* STEP 2 */
-    const newPassword = document.getElementById("newPassword").value;
-    const confirmPassword = document.getElementById("confirmNewPassword").value;
+    return;
+  }
 
-    if (!newPassword || !confirmPassword) {
-      alert("Please enter password");
-      return;
-    }
+  /* =========================
+     STEP 2: RESET PASSWORD
+  ========================= */
 
-    if (newPassword !== confirmPassword) {
-      alert("Passwords do not match");
-      return;
-    }
+  const newPassword = document.getElementById("newPassword").value;
+  const confirmPassword = document.getElementById("confirmNewPassword").value;
 
-    const res = await fetch("https://thinktwicefyp-production.up.railway.app/reset-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        token: resetToken,
-        newPassword
-      })
-    });
+  if (!newPassword || !confirmPassword) {
+    alert("Please enter password");
+    return;
+  }
 
-    const data = await res.json();
+  if (newPassword !== confirmPassword) {
+    alert("Passwords do not match");
+    return;
+  }
 
-    alert(data.message);
+  const res = await fetch("http://localhost:3000/reset-password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email,
+      token: resetToken,
+      newPassword
+    })
+  });
 
-    if (data.success) {
-      closeForgotModal();
+  const data = await res.json();
 
-      step = 1;
-      resetToken = null;
+  alert(data.message);
 
-      document.getElementById("sendResetBtn").innerText = "Verify Email";
+  if (data.success) {
+    closeForgotModal();
 
-      document.getElementById("newPasswordBox").style.display = "none";
-      document.getElementById("confirmNewPasswordBox").style.display = "none";
-    }
+    // reset UI state
+    step = 1;
+    resetToken = null;
 
-  } catch (err) {
-    alert("Request failed");
-    console.error(err);
+    document.getElementById("sendResetBtn").innerText = "Verify Email";
+
+    document.getElementById("newPasswordBox").style.display = "none";
+    document.getElementById("confirmNewPasswordBox").style.display = "none";
   }
 });
+
+setupPasswordToggle("toggleNewPassword", "newPassword");
+setupPasswordToggle("toggleConfirmNewPassword", "confirmNewPassword");
