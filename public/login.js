@@ -60,7 +60,7 @@ document.getElementById("signupBtn").addEventListener("click", async () => {
     return;
   }
 
-  const res = await fetch("https://thinktwicefyp-production.up.railway.app/signup", {
+  const res = await fetch("http://localhost:3000/signup", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fullname, email, password })
@@ -79,7 +79,7 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
   const password = document.getElementById("loginPassword").value;
   const remember = document.getElementById("rememberMe").checked;
 
-  const res = await fetch("https://thinktwicefyp-production.up.railway.app/login", {
+  const res = await fetch("http://localhost:3000/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password })
@@ -87,9 +87,9 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 
   const data = await res.json();
 
-alert(data.message);
+  alert(data.message);
 
-if (data.success) {
+  if (data.message === "Login successful") {
   localStorage.setItem("user", JSON.stringify(data.user));
 
   if (remember) {
@@ -100,6 +100,7 @@ if (data.success) {
 
   window.location.href = "fyp.html";
 }
+});
 
 /* =========================
    AUTO FILL EMAIL
@@ -160,7 +161,7 @@ document.getElementById("sendResetBtn").addEventListener("click", async () => {
       return;
     }
 
-    const res = await fetch("https://thinktwicefyp-production.up.railway.app/check-email", {
+    const res = await fetch("http://localhost:3000/check-email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email })
@@ -205,7 +206,7 @@ document.getElementById("sendResetBtn").addEventListener("click", async () => {
     return;
   }
 
-  const res = await fetch("https://thinktwicefyp-production.up.railway.app/reset-password", {
+  const res = await fetch("http://localhost:3000/reset-password", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
