@@ -17,17 +17,21 @@ app.use(express.json());
 /* ===================== MYSQL (PROMISE VERSION) ===================== */
 
 const db = mysql.createPool({
-  host: "localhost",
-  user: "root",
-  password: "",
-  database: "thinktwice_db",
+  host: process.env.MYSQLHOST || process.env.DB_HOST,
+  user: process.env.MYSQLUSER || process.env.DB_USER,
+  password: process.env.MYSQLPASSWORD || process.env.DB_PASSWORD,
+  database: process.env.MYSQLDATABASE || process.env.DB_NAME,
+  port: process.env.MYSQLPORT || process.env.DB_PORT || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
 });
 
 try {
   await db.query("SELECT 1");
   console.log("✅ MySQL Connected");
 } catch (err) {
-  console.log("❌ MySQL Error:", err);
+  console.error("❌ MySQL Connection Error:", err.message);
 }
 
 /* ===================== PATH ===================== */
