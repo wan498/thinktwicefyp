@@ -30,7 +30,7 @@ const db = mysql.createPool({
 (async () => {
   try {
     const conn = await db.getConnection();
-console.log("CONNECTED TO:", process.env.MYSQLHOST);
+console.log("CONNECTED TO:", process.env.DB_HOST);
 conn.release();
   } catch (err) {
     console.error("❌ MySQL Error:", err.message);
@@ -104,11 +104,12 @@ app.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    console.log("LOGIN HIT");
+    console.log("DB STATUS:", process.env.DB_HOST);
+
     const [rows] = await db.query(
       "SELECT * FROM users WHERE email=?",
       [email]
-      console.log("LOGIN HIT");
-      console.log("DB STATUS:", process.env.MYSQLHOST);
     );
 
     if (rows.length === 0) {
@@ -133,6 +134,7 @@ app.post("/login", async (req, res) => {
     });
 
   } catch (err) {
+    console.error("LOGIN ERROR:", err);
     return res.status(500).json({
       success: false,
       message: err.message,
