@@ -1,4 +1,10 @@
-const API_URL = window.location.origin;
+/* =========================
+   CHANGE THIS ONLY (IMPORTANT)
+========================= */
+
+// 🔥 PUT YOUR RAILWAY BACKEND URL HERE
+const API_URL = "https://thinktwicefyp-production.up.railway.app";
+
 /* =========================
    MODALS
 ========================= */
@@ -90,16 +96,16 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
   alert(data.message);
 
   if (data.message === "Login successful") {
-  localStorage.setItem("user", JSON.stringify(data.user));
+    localStorage.setItem("user", JSON.stringify(data.user));
 
-  if (remember) {
-    localStorage.setItem("savedEmail", email);
-  } else {
-    localStorage.removeItem("savedEmail");
+    if (remember) {
+      localStorage.setItem("savedEmail", email);
+    } else {
+      localStorage.removeItem("savedEmail");
+    }
+
+    window.location.href = "fyp.html";
   }
-
-  window.location.href = "fyp.html";
-}
 });
 
 /* =========================
@@ -206,15 +212,15 @@ document.getElementById("sendResetBtn").addEventListener("click", async () => {
     return;
   }
 
-  const res = await fetch(`${API_URL}/reset-password`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email,
-      token: resetToken,
-      newPassword
-    })
-  });
+    const res = await fetch(`${API_URL}/reset-password`, {
+     method: "POST",
+     headers: { "Content-Type": "application/json" },
+     body: JSON.stringify({
+       email,
+       token: resetToken,
+       newPassword
+     })
+   });
 
   const data = await res.json();
 
