@@ -9,6 +9,10 @@ import { fileURLToPath } from "url";
 
 dotenv.config();
 
+console.log("MYSQLHOST:", process.env.MYSQLHOST);
+console.log("MYSQLUSER:", process.env.MYSQLUSER);
+console.log("MYSQLDATABASE:", process.env.MYSQLDATABASE);
+
 const app = express();
 
 app.use(cors());
