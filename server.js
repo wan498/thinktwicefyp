@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import mysql from "mysql2/promise";
+import pg from "pg";
 import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import path from "path";
@@ -10,30 +10,21 @@ import { fileURLToPath } from "url";
 dotenv.config();
 
 const app = express();
-
-/* ===================== FIXED CORS ===================== */
-app.use(cors({
-  origin: "*"
-}));
-
+app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-/* ===================== MYSQL (RAILWAY SAFE) ===================== */
+/* ===================== DATABASE (NEON POSTGRES) ===================== */
 
-const db = mysql.createPool({
-  host: process.env.MYSQLHOST,
-  user: process.env.MYSQLUSER,
-  password: process.env.MYSQLPASSWORD,
-  database: process.env.MYSQLDATABASE,
-  port: process.env.MYSQLPORT,
-  waitForConnections: true,
-  connectionLimit: 10
+const { Pool } = pg;
+
+const db = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
 });
 
-/* test DB */
 db.query("SELECT 1")
-  .then(() => console.log("✅ MySQL Connected"))
-  .catch(err => console.log("❌ MySQL Error:", err));
+  .then(() => console.log("✅ PostgreSQL Connected (Neon)"))
+  .catch(err => console.log("❌ DB Error:", err));
 
 /* ===================== PATH ===================== */
 
@@ -55,12 +46,14 @@ app.post("/signup", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
 
     await db.query(
-      "INSERT INTO users(fullname, email, password) VALUES (?, ?, ?)",
+      "INSERT INTO users(fullname, email, password) VALUES ($1, $2, $3)",
       [fullname, email, hashedPassword]
     );
 
     res.json({ message: "Account created successfully" });
+
   } catch (err) {
+    console.error(err);
     res.status(400).json({ message: "Email already exists" });
   }
 });
@@ -68,96 +61,184 @@ app.post("/signup", async (req, res) => {
 /* ===================== LOGIN ===================== */
 
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email = ?",
-    [email]
-  );
+    const result = await db.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
 
-  if (rows.length === 0) {
-    return res.json({ message: "User not found" });
+    const rows = result.rows;
+
+    if (rows.length === 0) {
+      return res.json({ message: "User not found" });
+    }
+
+    const user = rows[0];
+
+    const valid = await bcrypt.compare(password, user.password);
+
+    if (!valid) {
+      return res.json({ message: "Wrong password" });
+    }
+
+    res.json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        fullname: user.fullname,
+        email: user.email,
+      },
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
   }
-
-  const user = rows[0];
-
-  const valid = await bcrypt.compare(password, user.password);
-
-  if (!valid) {
-    return res.json({ message: "Wrong password" });
-  }
-
-  res.json({
-    message: "Login successful",
-    user: {
-      id: user.id,
-      fullname: user.fullname,
-      email: user.email,
-    },
-  });
 });
 
 /* ===================== CHECK EMAIL ===================== */
 
 app.post("/check-email", async (req, res) => {
-  const { email } = req.body;
+  try {
+    const { email } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email = ?",
-    [email]
-  );
+    const result = await db.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
 
-  if (rows.length === 0) {
-    return res.json({ exists: false });
+    const rows = result.rows;
+
+    if (rows.length === 0) {
+      return res.json({ exists: false });
+    }
+
+    const token = crypto.randomBytes(32).toString("hex");
+    const expiry = new Date(Date.now() + 15 * 60 * 1000);
+
+    await db.query(
+      "UPDATE users SET reset_token=$1, reset_expiry=$2 WHERE email=$3",
+      [token, expiry, email]
+    );
+
+    res.json({ exists: true, token });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Server error" });
   }
-
-  const token = crypto.randomBytes(32).toString("hex");
-  const expiry = new Date(Date.now() + 15 * 60 * 1000);
-
-  await db.query(
-    "UPDATE users SET reset_token=?, reset_expiry=? WHERE email=?",
-    [token, expiry, email]
-  );
-
-  res.json({ exists: true, token });
 });
 
 /* ===================== RESET PASSWORD ===================== */
 
 app.post("/reset-password", async (req, res) => {
-  const { email, token, newPassword } = req.body;
+  try {
+    const { email, token, newPassword } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email=? AND reset_token=?",
-    [email, token]
-  );
+    const result = await db.query(
+      "SELECT * FROM users WHERE email=$1 AND reset_token=$2",
+      [email, token]
+    );
 
-  if (rows.length === 0) {
-    return res.json({ success: false, message: "Invalid token" });
+    const rows = result.rows;
+
+    if (rows.length === 0) {
+      return res.json({ success: false, message: "Invalid token" });
+    }
+
+    const user = rows[0];
+
+    if (new Date(user.reset_expiry) < new Date()) {
+      return res.json({ success: false, message: "Token expired" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await db.query(
+      `UPDATE users 
+       SET password=$1, reset_token=NULL, reset_expiry=NULL 
+       WHERE email=$2`,
+      [hashed, email]
+    );
+
+    res.json({
+      success: true,
+      message: "Password updated successfully",
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: "Server error" });
   }
-
-  const user = rows[0];
-
-  if (new Date(user.reset_expiry) < new Date()) {
-    return res.json({ success: false, message: "Token expired" });
-  }
-
-  const hashed = await bcrypt.hash(newPassword, 10);
-
-  await db.query(
-    `UPDATE users 
-     SET password=?, reset_token=NULL, reset_expiry=NULL 
-     WHERE email=?`,
-    [hashed, email]
-  );
-
-  res.json({ success: true, message: "Password updated successfully" });
 });
 
-/* ===================== RAILWAY FIX ===================== */
+/* ===================== REPORT ===================== */
+
+app.post("/report", async (req, res) => {
+  try {
+    const {
+      userId,
+      email,
+      reason,
+      description,
+      conversation,
+      reported_by
+    } = req.body;
+
+    const result = await db.query(
+      `INSERT INTO reports 
+      (user_id, email, reason, description, conversation, reported_by)
+      VALUES ($1,$2,$3,$4,$5,$6)
+      RETURNING id`,
+      [
+        userId || null,
+        email || "",
+        reason,
+        description || "",
+        conversation || "",
+        reported_by || "user"
+      ]
+    );
+
+    res.json({
+      success: true,
+      reportId: result.rows[0].id,
+      message: "Report submitted successfully"
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ===================== ACTION LOG ===================== */
+
+app.post("/action", async (req, res) => {
+  try {
+    const { email, action_type, pdf_name, conversation } = req.body;
+
+    await db.query(
+      `INSERT INTO user_actions 
+      (email, action_type, pdf_name, conversation, created_at)
+      VALUES ($1,$2,$3,$4,NOW())`,
+      [email, action_type, pdf_name, conversation]
+    );
+
+    res.json({ success: true });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false });
+  }
+});
+
+/* ===================== START SERVER ===================== */
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
