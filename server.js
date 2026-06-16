@@ -107,6 +107,8 @@ app.post("/login", async (req, res) => {
     const [rows] = await db.query(
       "SELECT * FROM users WHERE email=?",
       [email]
+      console.log("LOGIN HIT");
+      console.log("DB STATUS:", process.env.MYSQLHOST);
     );
 
     if (rows.length === 0) {
