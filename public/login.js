@@ -87,9 +87,9 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 
   const data = await res.json();
 
-  alert(data.message);
+alert(data.message);
 
-  if (data.message === "Login successful") {
+if (data.success) {
   localStorage.setItem("user", JSON.stringify(data.user));
 
   if (remember) {
@@ -100,7 +100,6 @@ document.getElementById("loginBtn").addEventListener("click", async () => {
 
   window.location.href = "fyp.html";
 }
-});
 
 /* =========================
    AUTO FILL EMAIL
