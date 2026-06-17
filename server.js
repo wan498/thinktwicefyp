@@ -68,7 +68,7 @@ app.post("/login", async (req, res) => {
       "SELECT * FROM users WHERE email = $1",
       [email]
     );
-
+    
     const rows = result.rows;
 
     if (rows.length === 0) {
